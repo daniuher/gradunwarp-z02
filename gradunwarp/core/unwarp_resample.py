@@ -12,10 +12,12 @@ import logging
 from scipy import ndimage
 from . import utils
 from .utils import CoordsVector as CV
+import pickle as pkl
 from . import globals
 from .globals import siemens_max_det
 import nibabel as nib
 import scipy.special
+import os
 
 #np.seterr(all='raise')
 
@@ -25,71 +27,73 @@ log = logging.getLogger('gradunwarp')
 class Unwarper(object):
     '''
     '''
-    def __init__(self, vol, m_rcs2ras, vendor, coeffs, fileName):
+    def __init__(self, vol, m_rcs2ras, displacement_field, g_xyz2rcs, fileName):
         '''
         '''
         self.vol = vol
         self.m_rcs2ras = m_rcs2ras
-        self.vendor = vendor
-        self.coeffs = coeffs
+        # self.vendor = vendor
+        self.dv = displacement_field
+        self.g_xyz2rcs = g_xyz2rcs # xyz (mm); rcs (unitless, simple row-column-slice index)
+        # self.coeffs = coeffs
         self.name=fileName
         self.warp = False
         self.nojac = False
         self.m_rcs2lai = None
 
         # grid is uninit by default
-        self.fovmin = None
-        self.fovmax = None
-        self.numpoints = None
+        # self.fovmin = None
+        # self.fovmax = None
+        # self.numpoints = None
 
         # interpolation order ( 1 = linear)
         self.order = 1
 
-    def eval_spharm_grid(self, vendor, coeffs):
-        '''
-        We evaluate the spherical harmonics on a less sampled grid.
-        This is a spacetime vs accuracy tradeoff.
-        '''
-        # init the grid first
-        if not self.fovmin:
-            fovmin = globals.siemens_fovmin
-        else:
-            fovmin = self.fovmin
-        if not self.fovmax:
-            fovmax = globals.siemens_fovmax
-        else:
-            fovmax = self.fovmax
-        if not self.numpoints:
-            numpoints = globals.siemens_numpoints
-        else:
-            numpoints = self.numpoints
+    # def eval_spharm_grid(self, vendor, coeffs):
+    #     '''
+    #     We evaluate the spherical harmonics on a less sampled grid.
+    #     This is a spacetime vs accuracy tradeoff.
+    #     '''
+    #     # init the grid first
+    #     if not self.fovmin:
+    #         fovmin = globals.siemens_fovmin
+    #     else:
+    #         fovmin = self.fovmin
+    #     if not self.fovmax:
+    #         fovmax = globals.siemens_fovmax
+    #     else:
+    #         fovmax = self.fovmax
+    #     if not self.numpoints:
+    #         numpoints = globals.siemens_numpoints
+    #     else:
+    #         numpoints = self.numpoints
 
-        # convert to mm
-        fovmin = fovmin * 1000.
-        fovmax = fovmax * 1000.
-        # the grid in meters. this is needed for spherical harmonics
-        vec = np.linspace(fovmin, fovmax, numpoints)
-        gvx, gvy, gvz = np.meshgrid(vec, vec, vec)
-        # mm
-        cf = (fovmax - fovmin) / numpoints
+    #     # convert to mm
+    #     fovmin = fovmin * 1000.
+    #     fovmax = fovmax * 1000.
+    #     # the grid in meters. this is needed for spherical harmonics
+    #     vec = np.linspace(fovmin, fovmax, numpoints)
+    #     gvx, gvy, gvz = np.meshgrid(vec, vec, vec)
+    #     # mm
+    #     cf = (fovmax - fovmin) / numpoints
 
-        # deduce the transformation from rcs to grid
-        g_rcs2xyz = np.array( [[0, cf, 0, fovmin],
-                               [cf, 0, 0, fovmin],
-                               [0, 0, cf, fovmin],
-                               [0, 0, 0, 1]], dtype=np.float32 )
+    #     # deduce the transformation from rcs to grid
+    #     g_rcs2xyz = np.array( [[0, cf, 0, fovmin],
+    #                            [cf, 0, 0, fovmin],
+    #                            [0, 0, cf, fovmin],
+    #                            [0, 0, 0, 1]], dtype=np.float32 )
 
-        # get the grid to rcs transformation also
-        g_xyz2rcs = np.linalg.inv(g_rcs2xyz)
+    #     # get the grid to rcs transformation also
+    #     g_xyz2rcs = np.linalg.inv(g_rcs2xyz)
 
-        log.info('Evaluating spherical harmonics')
-        log.info('on a ' + str(numpoints) + '^3 grid')
-        log.info('with extents ' + str(fovmin) + 'mm to ' + str(fovmax) + 'mm')
-        gvxyz = CV(gvx, gvy, gvz)
-        _dv, _dxyz = eval_spherical_harmonics(coeffs, vendor, gvxyz)
+    #     log.info('Evaluating spherical harmonics')
+    #     log.info('on a ' + str(numpoints) + '^3 grid')
+    #     log.info('with extents ' + str(fovmin) + 'mm to ' + str(fovmax) + 'mm')
+    #     gvxyz = CV(gvx, gvy, gvz)
+    #     _dv, _dxyz = eval_spherical_harmonics(coeffs, vendor, gvxyz)
 
-        return CV(_dv.x, _dv.y, _dv.z), g_xyz2rcs
-
+    #     return CV(_dv.x, _dv.y, _dv.z), g_xyz2rcs
+    
 
     def run(self):
         '''
@@ -101,7 +105,7 @@ class Unwarper(object):
             self.polarity = -1.
 
         # Evaluate spherical harmonics on a smaller grid
-        dv, g_xyz2rcs = self.eval_spharm_grid(self.vendor, self.coeffs)
+        # dv, g_xyz2rcs = self.eval_spharm_grid(self.vendor, self.coeffs)
 
         # transform RAS-coordinates into LAI-coordinates
         m_ras2lai = np.array([[-1.0, 0.0, 0.0, 0.0],
@@ -135,8 +139,8 @@ class Unwarper(object):
 
         # do the nonlinear unwarp
         if self.vendor == 'siemens':
-            self.out, self.vjacout = self.non_linear_unwarp_siemens(self.vol.shape, dv, dxyz,
-                                                                 m_rcs2lai, m_rcs2lai_nohalf, g_xyz2rcs)
+            self.out, self.vjacout = self.non_linear_unwarp_siemens(self.vol.shape, self.dv, dxyz,
+                                                                 m_rcs2lai, m_rcs2lai_nohalf, self.g_xyz2rcs)
 
     def non_linear_unwarp_siemens(self, volshape, dv, dxyz, m_rcs2lai, m_rcs2lai_nohalf, g_xyz2rcs):
         ''' Performs the crux of the unwarping.
@@ -172,7 +176,7 @@ class Unwarper(object):
 
         # essentially pre-allocating everything
         out = np.empty((nr, nc, ns), dtype=np.float32)
-        fullWarp = np.empty((nr, nc, ns, 3), dtype=np.float32)
+        self.fullWarp = np.empty((nr, nc, ns, 3), dtype=np.float32)
 
         vjacout = np.empty((nr, nc, ns), dtype=np.float32)
         im2 = np.empty((nr, nc), dtype=np.float32)
@@ -267,29 +271,34 @@ class Unwarper(object):
                 im2 = im2 * jim2
                 vjacout[..., s] = jim2
 
-            fullWarp[...,s,0]=vfsl.x
-            fullWarp[...,s,1]=vfsl.y
-            fullWarp[...,s,2]=vfsl.z
+            self.fullWarp[...,s,0]=vfsl.x
+            self.fullWarp[...,s,1]=vfsl.y
+            self.fullWarp[...,s,2]=vfsl.z
             out[..., s] = im2
 
         print()
 
-        img=nib.Nifti1Image(fullWarp, self.m_rcs2ras)
-        nib.save(img,"fullWarp_abs.nii.gz")
+        
         # return image and the jacobian
         return out, vjacout
 
-    def write(self, outfile):
-        log.info('Writing output to ' + outfile)
+    def write(self, outpath, prefix):
+        log.info('Writing output to ' + outpath + ' ' + prefix)
         # if out datatype is float64 make it float32
+        
         if self.out.dtype == np.float64:
+            log.info('Output array in float64 -> converting to float32')
             self.out = self.out.astype(np.float32)
-        if outfile.endswith('.nii') or outfile.endswith('.nii.gz'):
-            img = nib.Nifti1Image(self.out, self.m_rcs2ras)
-        if outfile.endswith('.mgh') or outfile.endswith('.mgz'):
-            #self.out = self.out.astype(self.vol.dtype)
-            img = nib.MGHImage(self.out, self.m_rcs2ras)
-        nib.save(img, outfile)
+            
+        img = nib.Nifti1Image(self.out, self.m_rcs2ras)
+        nib.save(img, os.path.join(outpath, prefix+'gnc.nii'))
+        log.info(f'Output array saved at {os.path.join(outpath, prefix+"gnc.nii")}')
+            
+        
+        # full warp save
+        img=nib.Nifti1Image(self.fullWarp, self.m_rcs2ras)
+        nib.save(img, os.path.join(outpath, prefix+'fullWarp_abs.nii'))
+        log.info(f'full absolute warp saved at {os.path.join(outpath, prefix+"fullWarp_abs.nii")}')
 
 
 def eval_siemens_jacobian_mult(F, dxyz):
@@ -317,44 +326,44 @@ def eval_siemens_jacobian_mult(F, dxyz):
     return jacdet
 
 
-def eval_spherical_harmonics(coeffs, vendor, vxyz):
-    ''' Evaluate spherical harmonics
+# def eval_spherical_harmonics(coeffs, vendor, vxyz):
+#     ''' Evaluate spherical harmonics
 
-    Parameters
-    ----------
-    coeffs : Coeffs (namedtuple)
-        the sph. harmonics coefficients got by parsing
-    vxyz : CoordsVector (namedtuple). Could be a scalar or a 6-element list
-        the x, y, z coordinates
-        in case of scalar or 3-element list, the coordinates are eval
-        in the function
-    resolution : float
-        (optional) useful in case vxyz is scalar
-    '''
-    # convert radius into mm
-    R0 = coeffs.R0_m  * 1000
+#     Parameters
+#     ----------
+#     coeffs : Coeffs (namedtuple)
+#         the sph. harmonics coefficients got by parsing
+#     vxyz : CoordsVector (namedtuple). Could be a scalar or a 6-element list
+#         the x, y, z coordinates
+#         in case of scalar or 3-element list, the coordinates are eval
+#         in the function
+#     resolution : float
+#         (optional) useful in case vxyz is scalar
+#     '''
+#     # convert radius into mm
+#     R0 = coeffs.R0_m  * 1000
 
-    x, y, z = vxyz
+#     x, y, z = vxyz
 
-    r, cos_theta, theta, phi = cart2sph(x, y, z)
+#     r, cos_theta, theta, phi = cart2sph(x, y, z)
 
-    if vendor == 'siemens':
-        log.info('along x...')
-        bx = siemens_B(coeffs.alpha_x, coeffs.beta_x, r, cos_theta, theta, phi, R0)
-        log.info('along y...')
-        by = siemens_B(coeffs.alpha_y, coeffs.beta_y, r, cos_theta, theta, phi, R0)
-        log.info('along z...')
-        bz = siemens_B(coeffs.alpha_z, coeffs.beta_z, r, cos_theta, theta, phi, R0)
-    else:
-        # GE
-        log.info('along x...')
-        bx = ge_D(coeffs.alpha_x, coeffs.beta_x, r, cos_theta, theta, phi)
-        log.info('along y...')
-        by = ge_D(coeffs.alpha_y, coeffs.beta_y, r, cos_theta, theta, phi)
-        log.info('along z...')
-        bz = ge_D(coeffs.alpha_z, coeffs.beta_z, r, cos_theta, theta, phi)
+#     if vendor == 'siemens':
+#         log.info('along x...')
+#         bx = siemens_B(coeffs.alpha_x, coeffs.beta_x, r, cos_theta, theta, phi, R0)
+#         log.info('along y...')
+#         by = siemens_B(coeffs.alpha_y, coeffs.beta_y, r, cos_theta, theta, phi, R0)
+#         log.info('along z...')
+#         bz = siemens_B(coeffs.alpha_z, coeffs.beta_z, r, cos_theta, theta, phi, R0)
+#     else:
+#         # GE
+#         log.info('along x...')
+#         bx = ge_D(coeffs.alpha_x, coeffs.beta_x, r, cos_theta, theta, phi)
+#         log.info('along y...')
+#         by = ge_D(coeffs.alpha_y, coeffs.beta_y, r, cos_theta, theta, phi)
+#         log.info('along z...')
+#         bz = ge_D(coeffs.alpha_z, coeffs.beta_z, r, cos_theta, theta, phi)
 
-    return CV(bx * R0, by * R0, bz * R0), CV(x, y, z)
+#     return CV(bx * R0, by * R0, bz * R0), CV(x, y, z)
 
 
 def cart2sph(x1, y1, z1):
@@ -387,23 +396,23 @@ def siemens_B(alpha, beta, r, cosine_theta, theta, phi, R0):
             b += f * _p * f2
     return b
 
-# For consistency with GE papers, use theta & phi -> phi & theta
-def ge_D(alpha, beta, r, cosine_phi, phi, theta, z1):
-    ''' GE Gradwarp coeffs define the error rather than the total
-    gradient field'''
+# # For consistency with GE papers, use theta & phi -> phi & theta
+# def ge_D(alpha, beta, r, cosine_phi, phi, theta, z1):
+#     ''' GE Gradwarp coeffs define the error rather than the total
+#     gradient field'''
 
-    nmax = alpha.shape[0] - 1
+#     nmax = alpha.shape[0] - 1
 
-    r = r * 100.0  # GE wants cm, so meters -> cm
-    d = np.zeros(theta.shape)
+#     r = r * 100.0  # GE wants cm, so meters -> cm
+#     d = np.zeros(theta.shape)
 
-    for n in range(0, nmax + 1):
-        # So GE uses the usual unnormalized legendre polys.
-        f = np.power(r, n)
-        for m in range(0, n + 1):
-            f2 = alpha[n, m] * np.cos(m * theta) + beta[n, m] \
-            * np.sin(m * theta)
-            _p = scipy.special.lpmv(m, n, cosine_phi)
-            d += f * _p * f2
-    d = d / 100.0  # cm back to meters
-    return d
+#     for n in range(0, nmax + 1):
+#         # So GE uses the usual unnormalized legendre polys.
+#         f = np.power(r, n)
+#         for m in range(0, n + 1):
+#             f2 = alpha[n, m] * np.cos(m * theta) + beta[n, m] \
+#             * np.sin(m * theta)
+#             _p = scipy.special.lpmv(m, n, cosine_phi)
+#             d += f * _p * f2
+#     d = d / 100.0  # cm back to meters
+#     return d

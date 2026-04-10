@@ -6,12 +6,11 @@
 ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ### ##
 import logging
 
-VERSION = '1.2.3'
+VERSION = '1.2.3.1'
 
 usage = '''
 gradient_unwarp infile outfile manufacturer -g <coefficient file> [optional arguments]
 '''
-
 
 # SIEMENS stuff
 siemens_cas = 100  # coefficient array size
@@ -21,12 +20,11 @@ siemens_numpoints = 60 # number of grid points in each direction
 # max jacobian determinant for siemens
 siemens_max_det = 10.
 
-
-# GE stuff
-ge_cas = 6  # coefficient array size
-ge_fov_min = -0.5
-ge_fov_max = 0.5
-ge_resolution = 0.0075
+# # GE stuff
+# ge_cas = 6  # coefficient array size
+# ge_fov_min = -0.5
+# ge_fov_max = 0.5
+# ge_resolution = 0.0075
 
 
 def get_logger():
