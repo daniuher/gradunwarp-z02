@@ -27,14 +27,13 @@ log = logging.getLogger('gradunwarp')
 class Unwarper(object):
     '''
     '''
-    def __init__(self, vol, m_rcs2ras, displacement_field, g_xyz2rcs, fileName):
+    def __init__(self, vol, m_rcs2ras, scanner, fileName):
         '''
         '''
         self.vol = vol
         self.m_rcs2ras = m_rcs2ras
         # self.vendor = vendor
-        self.dv = displacement_field
-        self.g_xyz2rcs = g_xyz2rcs # xyz (mm); rcs (unitless, simple row-column-slice index)
+        self.scanner = scanner
         # self.coeffs = coeffs
         self.name=fileName
         self.warp = False
@@ -104,8 +103,19 @@ class Unwarper(object):
         if self.warp:
             self.polarity = -1.
 
-        # Evaluate spherical harmonics on a smaller grid
+        # Evaluate spherical harmonics on a smaller grid (skipped here)
         # dv, g_xyz2rcs = self.eval_spharm_grid(self.vendor, self.coeffs)
+        
+        # load spherical harmonics according to scanner specification
+        if self.scanner == '7Tx'
+            np.load("/home/duher/sph_harm_7Tx.npz")
+        elif self.scanner == '7Tplus'
+            np.load("/home/duher/sph_harm_7Tplus.npz")
+        else
+            sys.exit('Error: scanner specified incorrectly. Please specify either "7Tx" or "7Tplus" based on where your data was acquired.')
+            
+        dv = CV(data["dv_x"], data["dv_y"], data["dv_z"])
+        g_xyz2rcs = data["g_xyz2rcs"]
 
         # transform RAS-coordinates into LAI-coordinates
         m_ras2lai = np.array([[-1.0, 0.0, 0.0, 0.0],
@@ -240,6 +250,7 @@ class Unwarper(object):
             # convert the locations got into RCS indices
             vrcsw = utils.transform_coordinates(vxyzw,
                                                 np.linalg.inv(m_rcs2lai))
+                                                
             # map the internal voxel coordinates to FSL scaled mm coordinates
             vfsl = utils.transform_coordinates(vrcsw, m_vox2fsl)
 

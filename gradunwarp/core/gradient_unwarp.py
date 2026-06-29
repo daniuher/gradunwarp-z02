@@ -34,16 +34,24 @@ def argument_parse_gradunwarp():
                   help='The output file prefix (without file extension)')
     # p.add_argument('vendor', action='store', choices=['siemens', 'ge'], 
     #               help='vendor (either "ge" or "siemens" for now)')
-    p.add_argument('displacement_field', action='store',
-                   help='The displacement field for your data - depends on the scanner')
-    p.add_argument('grad2rcs', action='store',
-                   help='The transformation matrix from the displacement grid to row-column-slice (mm)')
+    
+    # these two parameters need to be downloaded from Z02 GitLab
+    p.add_argument('scanner', action='store',
+                   help='option either "7Tx" or "7Tplus"')
+
 
     # optional arguments
     p.add_argument('-w', '--warp', action='store_true', default=False,
                   help='warp a volume (as opposed to unwarping)')
     p.add_argument('-n', '--nojacobian', dest='nojac', action='store_true',
                   default=False, help='Do not perform Jacobian intensity correction')
+                  
+    # These arguments are not necessary since we pre-evaluated the SH
+    
+    # --fovmin .. fixed at -0.3m
+    # --fovmax .. fixed at 0.3m
+    # --numpoints .. fixed at 512
+    
     # p.add_argument('--fovmin', dest='fovmin',
     #               help='the minimum extent of harmonics evaluation grid in meters')
     # p.add_argument('--fovmax', dest='fovmax',
@@ -103,8 +111,7 @@ class GradientUnwarpRunner(object):
 
         self.unwarper = Unwarper(self.vol, # the input volume to be unwarped
                                  self.m_rcs2ras, # the affine of the input volume
-                                 self.args.displacement_field, # the displacement field to be used for unwarping
-                                 self.args.grad2rcs, # the affine for moving from unitless gradient coil grid to row-column-slice (mm)
+                                 self.args.scanner # specification of the scanner
                                  self.args.infile, # the path to the input image file
                                  )
         
